@@ -1,125 +1,93 @@
-// run the following command to install:
-// npm install objection knex sqlite3
+import path from 'path'
+import hapi from 'hapi'
+import inert from 'inert'
+import fs from 'vsd-plugin-fs'
+import blipp from 'blipp'
+import Knex from 'knex'
+// import { knexSnakeCaseMappers } from 'objection'
+import api from '@stoneware/api'
+import { createModels1 } from '@stoneware/db'
 
-const Knex = require('knex')
-const { Model } = require('objection')
+const relativeTo = path.resolve(__dirname, '../project')
 
-// Initialize knex.
-const knex = Knex({
-  client: 'mysql2',
-  connection: {
-    host: '127.0.0.1',
-    user: 'root',
-    password: 'Babble01',
-    database: 'stoneware'
-  }
-})
-
-// Give the knex object to objection.
-Model.knex(knex)
-
-// Person model.
-class Person extends Model {
-  // Table name is the only required property.
-  static get tableName () {
-    return 'persons'
-  }
-
-  // Each model must have a column (or a set of columns) that uniquely
-  // identifies the rows. The column(s) can be specified using the `idColumn`
-  // property. `idColumn` returns `id` by default and doesn't need to be
-  // specified unless the model's primary key is something else.
-  static get idColumn () {
-    return 'id'
-  }
-
-  // Methods can be defined for model classes just as you would for
-  // any javascript class. If you want to include the result of these
-  // method in the output json, see `virtualAttributes`.
-  fullName () {
-    return this.firstName + ' ' + this.lastName
-  }
-
-  // Optional JSON schema. This is not the database schema!
-  // Nothing is generated based on this. This is only used
-  // for input validation. Whenever a model instance is created
-  // either explicitly or implicitly it is checked against this schema.
-  // http://json-schema.org/.
-  static get jsonSchema () {
-    return {
-      type: 'object',
-      required: ['firstName', 'lastName'],
-
-      properties: {
-        id: { type: 'integer' },
-        parentId: { type: ['integer', 'null'] },
-        firstName: { type: 'string', minLength: 1, maxLength: 255 },
-        lastName: { type: 'string', minLength: 1, maxLength: 255 },
-        age: { type: 'number' },
-
-        // Properties defined as objects or arrays are
-        // automatically converted to JSON strings when
-        // writing to database and back to objects and arrays
-        // when reading from database. To override this
-        // behaviour, you can override the
-        // Person.jsonAttributes property.
-        address: {
-          type: 'object',
-          properties: {
-            street: { type: 'string' },
-            city: { type: 'string' },
-            zipCode: { type: 'string' }
-          }
-        }
-      }
+async function createServer () {
+  // Create the hapi server
+  const server = hapi.server({
+    port: 3004,
+    routes: {
+      cors: true
     }
-  }
-}
-
-class Type extends Model {
-  static get tableName () {
-    return 'types'
-  }
-}
-
-// Create database schema. You should use knex migration files to do this.
-// We create it here for simplicity.
-async function createSchema () {
-  const hasTable = await knex.schema.hasTable('persons')
-  if (!hasTable) {
-    return knex.schema.createTable('persons', (table) => {
-      table.increments('id').primary()
-      table.integer('parentId').references('persons.id')
-      table.string('firstName')
-    })
-  }
-}
-
-async function main () {
-  // Create some people.
-  const sylvester = await Person.query().insertGraph({
-    firstName: 'Sylvester',
-
-    children: [
-      {
-        firstName: 'Sage'
-      },
-      {
-        firstName: 'Sophia'
-      }
-    ]
   })
 
-  console.log('created:', sylvester)
+  const appfilePath = path.join(relativeTo, 'app.json')
+  const knexfilePath = path.join(relativeTo, 'knexfile')
 
-  // Fetch all people named Sylvester and sort them by id.
-  // Load `children` relation eagerly.
-  const sylvesters = await Person.query()
-    .where('firstName', 'Sylvester')
-    .eager('children')
-    .orderBy('id')
+  const [ app, knexfile ] = await Promise
+    .all([ appfilePath, knexfilePath ].map(file => {
+      // eslint-disable-next-line
+      return import(file)
+    }))
+    .catch(err => (console.log(err)))
 
-  console.log('sylvesters:', sylvesters)
+  const environment = process.env.NODE_ENV || 'development'
+  const knex = Knex(knexfile[environment])
+  const models = await createModels1(app, knex, { relativeTo })
+
+  await server.register(inert)
+  await server.register(blipp)
+  await server.register(fs, { routes: { prefix: '/fs' } })
+
+  await server.register({
+    plugin: api,
+    options: { app, models, relativeTo }
+  }, {
+    routes: { prefix: '/api' }
+  })
+
+  //
+  // todo: Register userland plugins...
+  //
+
+  server.ext('onPreResponse', (request, h) => {
+    const response = request.response
+
+    if (response.isBoom) {
+      // An error was raised during
+      // processing the request
+      const statusCode = response.output.statusCode
+
+      console.error({
+        statusCode: statusCode,
+        data: response.data,
+        message: response.message
+      })
+    }
+    return h.continue
+  })
+
+  server.route({
+    method: 'get',
+    path: '/app',
+    handler: {
+      file: {
+        path: path.join(relativeTo, 'app.json'),
+        confine: false
+      }
+    }
+  })
+
+  server.start()
+
+  return server
 }
 
-createSchema().then(() => main()).catch(console.error)
+createServer()
+  .then(server => {
+    const info = {
+      uri: server.info.uri,
+      message: 'Started server'
+    }
+
+    console.info(info.message, info.uri)
+  })
+  .catch(err => console.error(err))
