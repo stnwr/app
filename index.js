@@ -6,7 +6,7 @@ import blipp from 'blipp'
 import Knex from 'knex'
 // import { knexSnakeCaseMappers } from 'objection'
 import api from '@stoneware/api'
-import { createModels1 } from '@stoneware/db'
+import { createModels } from '@stoneware/db'
 
 const relativeTo = path.resolve(__dirname, '../project')
 
@@ -31,7 +31,7 @@ async function createServer () {
 
   const environment = process.env.NODE_ENV || 'development'
   const knex = Knex(knexfile[environment])
-  const models = await createModels1(app, knex, { relativeTo })
+  const models = await createModels(app, knex, { relativeTo })
 
   await server.register(inert)
   await server.register(blipp)
