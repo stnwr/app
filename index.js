@@ -19,7 +19,7 @@ async function createServer () {
     }
   })
 
-  const appfilePath = path.join(relativeTo, 'app.json')
+  const appfilePath = path.join(relativeTo, 'nearlife.json')
   const knexfilePath = path.join(relativeTo, 'knexfile')
 
   const [ app, knexfile ] = await Promise
@@ -29,7 +29,7 @@ async function createServer () {
     }))
     .catch(err => (console.log(err)))
 
-  const environment = process.env.NODE_ENV || 'development'
+  const environment = process.env.NODE_ENV || 'nearlife'
   const knex = Knex(knexfile[environment])
   const models = await createModels(app, knex, { relativeTo })
 
@@ -70,7 +70,7 @@ async function createServer () {
     path: '/app',
     handler: {
       file: {
-        path: path.join(relativeTo, 'app.json'),
+        path: path.join(relativeTo, 'nearlife.json'),
         confine: false
       }
     }
